@@ -40,6 +40,12 @@ func Run(name string) error {
 		if err := observationsCompletion(api); err != nil {
 			return err
 		}
+	case "backup-restore":
+		// This check exercises the offline backup package directly against real
+		// snapshot files; no HTTP surface is involved.
+		if err := backupRestore(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown workflow check %q", name)
 	}

@@ -40,13 +40,19 @@ func run(arguments []string) error {
 			return usageError()
 		}
 		return workflowcheck.Run(arguments[1])
+	case "backup":
+		return runBackup(arguments[1:], os.Stdout, os.Stderr, os.Stdin)
+	case "restore":
+		return runRestore(arguments[1:], os.Stdout, os.Stderr, os.Stdin)
+	case "inspect-backup":
+		return runInspectBackup(arguments[1:], os.Stdout, os.Stderr, os.Stdin)
 	default:
 		return usageError()
 	}
 }
 
 func usageError() error {
-	return errors.New("usage: fermentctl serve | fermentctl check <workflow>")
+	return errors.New("usage: fermentctl serve | backup | restore | inspect-backup | fermentctl check <workflow>")
 }
 
 func serve() error {
@@ -57,6 +63,11 @@ func serve() error {
 	if err := cfg.EnsureDataDir(); err != nil {
 		return err
 	}
+	dataLock, err := storage.AcquireSharedDataLock(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer dataLock.Close()
 	store, err := storage.Open(cfg.DataDir)
 	if err != nil {
 		return err

@@ -74,3 +74,18 @@ func valueOrDefault(name, fallback string) string {
 	}
 	return fallback
 }
+
+// ResolveDataDir picks the data directory used by the offline commands: an
+// explicit flag wins, then CELLAR_CONTROL_DATA_DIR, then the default. The path
+// is returned absolute and cleaned; it is not created until it is needed.
+func ResolveDataDir(explicit string) (string, error) {
+	value := strings.TrimSpace(explicit)
+	if value == "" {
+		value = valueOrDefault("CELLAR_CONTROL_DATA_DIR", DefaultDataDir)
+	}
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return "", fmt.Errorf("resolve data directory: %w", err)
+	}
+	return filepath.Clean(absolute), nil
+}

@@ -150,15 +150,50 @@ transitions return stable failures without changing persisted state.
 This path crosses HTTP protocol handling, application orchestration, numeric
 domain rules, and snapshot storage.
 
+### 4. Backup And Restore Migration
+
+Standalone CLI entry points are:
+
+- `fermentctl backup [--data-dir DIR] [--output FILE|DIR] [--force]`
+- `fermentctl inspect-backup [--quiet] <archive>`
+- `fermentctl restore [--data-dir DIR] [--safety-copy FILE] [--yes] <archive>`
+
+The operator previews every formula, vessel, run, gravity observation count,
+and cleaning fact before a checksummed archive is written. The archive embeds
+the canonical full snapshot as base64 JSON together with a manifest and a
+SHA-256 payload digest. Before restoring, the archive checksum is recomputed
+and the payload is validated semantically (manifest counts, lookup indexes,
+entity rules, observation sequences, recomputed completion metrics, and
+cross-entity references). The restore scope lists records added, overwritten,
+identical, and removed, plus unique-key collisions where a different target ID
+already owns the same formula name, vessel code, or run code. The switch only
+happens after explicit confirmation.
+
+An interruption cannot damage the live cellar: an exclusive data-directory
+lock rejects restore while the service is serving; the previous snapshot is
+preserved first at a timestamped rollback path that never overwrites an earlier
+copy; replacement is atomic and durably synced; the installed bytes are re-read
+and hashed against the verified backup with automatic rollback on mismatch; and
+a target change between planning and confirmation aborts the operation.
+Repeating a backup reports an existing identical archive or twin payload
+instead of writing a duplicate, and repeating a restore is a no-op.
+
+This path crosses CLI orchestration, archive verification, snapshot planning,
+atomic file replacement with rollback, and process locking; it does not use
+the HTTP API.
+
 ## Modules
 
-- `cmd/fermentctl`: executable entry point for the HTTP service and bounded
-  workflow checks.
+- `cmd/fermentctl`: executable entry point for the HTTP service, the offline
+  backup/restore commands, and bounded workflow checks.
 - `internal/config`: environment and command-line configuration.
 - `internal/clock`: deterministic clock boundary for production and checks.
 - `internal/domain`: entities, validation, state transitions, and metrics.
 - `internal/service`: use-case orchestration and revision coordination.
-- `internal/storage`: snapshot repository, atomic replacement, and locking.
+- `internal/storage`: snapshot repository, atomic replacement, canonical
+  hashing, and inter-process locking.
+- `internal/backup`: archive envelope, integrity verification, backup preview,
+  restore scope planning, and safe application.
 - `internal/httpapi`: routing, strict JSON decoding, error mapping, and health.
 - `internal/workflowcheck`: real HTTP workflow checks used by the executable.
 
@@ -217,6 +252,7 @@ behavior, and exit without external services:
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check backup-restore`
 
 ## Scope Limits
 
