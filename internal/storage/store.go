@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/domain"
@@ -19,21 +20,60 @@ type Store struct {
 	path     string
 	snapshot domain.Snapshot
 	now      func() time.Time
+	lockFile *os.File
 }
 
 func Open(dataDir string) (*Store, error) {
+	return open(dataDir, true)
+}
+
+// openWithoutProcessLock opens a store without taking the directory flock.
+// It exists for tests that open the same directory twice in one process.
+func openWithoutProcessLock(dataDir string) (*Store, error) {
+	return open(dataDir, false)
+}
+
+func open(dataDir string, withLock bool) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
+	}
+	var lockFile *os.File
+	if withLock {
+		lock, err := acquireDataDirLock(dataDir)
+		if err != nil {
+			return nil, err
+		}
+		lockFile = lock
 	}
 	store := &Store{
 		path:     filepath.Join(dataDir, stateFileName),
 		snapshot: domain.EmptySnapshot(),
 		now:      func() time.Time { return time.Now().UTC() },
+		lockFile: lockFile,
 	}
 	if err := store.load(); err != nil {
+		store.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+// Close releases the data directory lock. A closed Store must not be reused.
+func (s *Store) Close() error {
+	if s.lockFile == nil {
+		return nil
+	}
+	path := s.lockFile.Name()
+	var firstError error
+	if err := syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN); err != nil {
+		firstError = err
+	}
+	if err := s.lockFile.Close(); err != nil && firstError == nil {
+		firstError = err
+	}
+	s.lockFile = nil
+	_ = os.Remove(path)
+	return firstError
 }
 
 func (s *Store) load() error {
@@ -48,12 +88,18 @@ func (s *Store) load() error {
 	if err := json.Unmarshal(raw, &loaded); err != nil {
 		return fmt.Errorf("decode state: %w", err)
 	}
-	normalized, err := normalizeSnapshot(loaded)
+	normalized, err := NormalizeSnapshot(loaded)
 	if err != nil {
 		return err
 	}
 	s.snapshot = normalized
 	return nil
+}
+
+// NormalizeSnapshot fills required indexes and validates that every index
+// matches its collection. It is used at startup and by offline backup tooling.
+func NormalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
+	return normalizeSnapshot(value)
 }
 
 func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {

@@ -40,13 +40,19 @@ func run(arguments []string) error {
 			return usageError()
 		}
 		return workflowcheck.Run(arguments[1])
+	case "backup":
+		return runBackupCommand(arguments[1:], os.Stdout, os.Stderr)
+	case "restore":
+		return runRestoreCommand(arguments[1:], os.Stdin, os.Stdout, os.Stderr)
+	case "verify-backup":
+		return runVerifyBackupCommand(arguments[1:], os.Stdout, os.Stderr)
 	default:
 		return usageError()
 	}
 }
 
 func usageError() error {
-	return errors.New("usage: fermentctl serve | fermentctl check <workflow>")
+	return errors.New("usage: fermentctl serve | check <workflow> | backup [flags] | restore --file <backup> | verify-backup --file <backup>")
 }
 
 func serve() error {
@@ -61,6 +67,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	defer store.Close()
 	app := service.New(store, clock.System{})
 	server := &http.Server{
 		Addr:              cfg.Address,

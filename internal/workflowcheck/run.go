@@ -22,6 +22,7 @@ func Run(name string) error {
 	if err != nil {
 		return err
 	}
+	defer store.Close()
 	app := service.New(store, clock.System{})
 	server := httptest.NewServer(httpapi.NewHandler(app))
 	defer server.Close()

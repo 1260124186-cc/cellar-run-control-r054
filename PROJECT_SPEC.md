@@ -152,13 +152,16 @@ domain rules, and snapshot storage.
 
 ## Modules
 
-- `cmd/fermentctl`: executable entry point for the HTTP service and bounded
-  workflow checks.
+- `cmd/fermentctl`: executable entry point for the HTTP service, bounded
+  workflow checks, and offline backup/restore commands.
 - `internal/config`: environment and command-line configuration.
 - `internal/clock`: deterministic clock boundary for production and checks.
 - `internal/domain`: entities, validation, state transitions, and metrics.
 - `internal/service`: use-case orchestration and revision coordination.
-- `internal/storage`: snapshot repository, atomic replacement, and locking.
+- `internal/storage`: snapshot repository, atomic replacement, process lock,
+  and crash-safe snapshot restore.
+- `internal/backup`: checksummed backup envelope, inventory listing,
+  verification, restore conflict analysis, and overwrite planning.
 - `internal/httpapi`: routing, strict JSON decoding, error mapping, and health.
 - `internal/workflowcheck`: real HTTP workflow checks used by the executable.
 
@@ -198,9 +201,31 @@ an in-process mutex. The complete state is encoded, committed to durable
 storage, and then atomically renamed over the target. An update is not
 published in memory unless persistence succeeds.
 
+While a process has the data directory open it holds an exclusive OS lock at
+`.cellar-control.lock` (with stale-lock recovery). The offline `backup`,
+`restore`, and `verify-backup` commands share that lock, so they cannot run
+against a directory a live server is using.
+
+`restore` stages and fsyncs the replacement snapshot, durably copies the
+current `state.json` to `state.pre-restore.json`, and only then renames the
+new snapshot into place. An interrupted restore leaves either the previous
+live snapshot or the complete new one, and the safety copy enables rollback.
+
 Reads use copied values and never expose repository-owned maps or slices. The
 default address is `127.0.0.1:8088`, the request body limit is 1 MiB, and all
 workflow checks use temporary directories.
+
+## Backup Envelope
+
+A backup is a single JSON file: an indented envelope around a canonical
+compact payload. The payload is the full snapshot encoded deterministically
+(UTC timestamps, no HTML escaping), so identical cellar state has identical
+payload bytes. The manifest records format version, source, snapshot
+revision, row counts, payload length, and timestamps. The file carries a
+SHA-256 digest of the payload, a SHA-256 signature over the canonical
+manifest, and a SHA-256 digest over the complete envelope. Verification
+recomputes all three, validates structural and referential integrity, and
+reconciles the manifest counts and revision.
 
 ## Validation Plan
 
